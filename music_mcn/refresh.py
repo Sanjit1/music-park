@@ -100,7 +100,7 @@ def download_file(url: str, destination: Path) -> None:
 def expected_sha256(sums_file: Path, filename: str) -> str:
     for line in sums_file.read_text(encoding="utf-8", errors="replace").splitlines():
         parts = line.strip().split()
-        if len(parts) >= 2 and Path(parts[-1]).name == filename:
+        if len(parts) >= 2 and Path(parts[-1].lstrip("*")).name == filename:
             return parts[0]
     raise RefreshError(f"Could not find checksum for {filename} in {sums_file}")
 

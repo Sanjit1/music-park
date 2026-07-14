@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/sportsmaster/music-park
-EnvironmentFile=/home/sportsmaster/music-park/deploy/.env
+WorkingDirectory=/home/sanjit/music-park
+EnvironmentFile=/home/sanjit/music-park/deploy/.env
 ExecStart=/usr/bin/python3 scripts/run_api.py
 Restart=on-failure
 RestartSec=5
