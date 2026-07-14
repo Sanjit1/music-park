@@ -1,0 +1,28 @@
+server {
+    listen 80;
+    server_name api.example.com;
+
+    # Optional public hardening:
+    # put this in the http {} block:
+    # limit_req_zone $binary_remote_addr zone=mcn_path:10m rate=30r/m;
+    #
+    # then uncomment inside location /mcn/path:
+    # limit_req zone=mcn_path burst=10 nodelay;
+
+    location /mcn/path {
+        # limit_req zone=mcn_path burst=10 nodelay;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

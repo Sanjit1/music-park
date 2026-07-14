@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.env
+.ignore
+
+data/artifacts/*
+!data/artifacts/.gitkeep
+
+data/cache/
+data/downloads/
+data/locks/
+data/mbdump/*
+!data/mbdump/.gitkeep
+data/work/
+deploy/.env

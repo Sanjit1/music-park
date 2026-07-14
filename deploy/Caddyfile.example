@@ -1,0 +1,15 @@
+api.example.com {
+    # Optional public hardening with caddy-ratelimit plugin:
+    #
+    # rate_limit {
+    #     zone mcn_path {
+    #         key {remote_host}
+    #         events 30
+    #         window 1m
+    #         match {
+    #             path /mcn/path
+    #         }
+    #     }
+    # }
+    reverse_proxy 127.0.0.1:8000
+}

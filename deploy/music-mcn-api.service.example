@@ -1,0 +1,16 @@
+[Unit]
+Description=Music Collaboration Number API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sportsmaster/music-park
+EnvironmentFile=/home/sportsmaster/music-park/deploy/.env
+ExecStart=/usr/bin/python3 scripts/run_api.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

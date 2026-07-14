@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh Music Collaboration Number graph
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/sportsmaster/music-park
+ExecStart=/usr/bin/python3 scripts/refresh_graph.py --data-root data --keep-graph-versions 2 --min-free-gb 45 --service-name music-mcn-api --restart-service

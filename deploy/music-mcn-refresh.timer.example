@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Music Collaboration Number graph refresh every 14 days
+
+[Timer]
+OnBootSec=15m
+OnUnitActiveSec=14d
+Persistent=true
+
+[Install]
+WantedBy=timers.target
