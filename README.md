@@ -129,7 +129,7 @@ This project is made with data from MusicBrainz. Because of the rate limits, it 
 ```json
 {
     "a:123": ["r:900", "m:55"],
-    "r:900": ["a:123", "a:456", "a:789"],
+    "r:900": ["a:123", "a :456", "a:789"],
     "a:456": ["r:900"],
     "m:55": ["a:123", "a:777"],
 }
@@ -151,22 +151,32 @@ A4 --- M1
 ```
 
 
-The graph can be built using the command:
-```bash
-python scripts/build_graph.py --dump-dir data/mbdump --out data/artifacts/graph
-```
+The graph is built using `python scripts/build_graph.py --dump-dir data/mbdump --out data/artifacts/graph`. This builds the graph while ignoring artists with more than 100,000 recordings and artists with "various" in their name.
 
-This builds the graph while ignoring artists with more than 100,000 recordings and artists with "various" in their name. 
-
-Ideally, this graph refreshes automatically, for which there is a script `scripts/refresh_graph.py`. Run it as
+Instead of downloading the graph builder and building the graph manually, you can just run `scripts/refresh_graph.py` to download the latest graph artifact from the web app. This script will download the latest graph artifact and store it in `data/artifacts/current`. It will also keep the last 2 versions of the graph artifact and delete older versions. The script can be run as:
 ```bash
 python scripts/refresh_graph.py \
   --data-root data \
   --keep-graph-versions 2 \
   --min-free-gb 45 \
-  --service-name music-mcn-api \
+  --service-name music-mcn-refresh \
   --restart-service
-  ```
+```
+
+Restarting the service will only work if the service is running to begin with. You can enable the service by running:
+```bash
+sudo cp deploy/music-mcn-refresh.service.example /etc/systemd/system/music-mcn-refresh.service
+sudo cp deploy/music-mcn-refresh.timer.example /etc/systemd/system/music-mcn-refresh.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now music-mcn-refresh.timer
+
+systemctl list-timers --all | grep music-mcn-refresh
+```
+For real time logging of the refresh service, run:
+```bash
+journalctl -u music-mcn-refresh -f
+```
+Make sure to change `WorkingDirectory`, `EnvironmentFile`, and `ExecStart` in the service file to point to your virtual environment and graph artifact directory.
 
 
 ### Search Tool
@@ -188,6 +198,24 @@ A local api is available as a FastAPI wrapper around the search tool. It can be 
 ```bash
 python scripts/run_api.py --graph data/artifacts/current --host 127.0.0.1 --port 8000
 ```
+You can run it as a service:
+```bash
+sudo cp deploy/music-mcn-api.service.example /etc/systemd/system/music-mcn-api.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now music-mcn-api
+
+sudo systemctl status music-mcn-api
+```
+
+For real time logging of the API service, run:
+
+```bash
+journalctl -u music-mcn-api -f
+```
+Remember to change `WorkingDirectory`, `EnvironmentFile`, and `ExecStart` in the service file to point to your virtual environment and graph artifact directory.
+
+
+
 For deployment, configure explicit frontend origins in the environment.
 
 ### A checklist for me to remember lol:
