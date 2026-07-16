@@ -19,6 +19,7 @@ MEMBERSHIP_PREFIX = "m:"
 
 REQUIRED_TABLES = [
     "artist",
+    "artist_alias",
     "recording",
     "artist_credit_name",
     "link_type",
@@ -34,6 +35,18 @@ membership_node = lambda relationship_id: f"{MEMBERSHIP_PREFIX}{relationship_id}
 def _add_edge(adjacency: dict[str, list[str]], left: str, right: str) -> None:
     adjacency.setdefault(left, []).append(right)
     adjacency.setdefault(right, []).append(left)
+
+
+def _add_index_value(index: dict[str, list[str]], raw_value: object, node: str) -> str:
+    normalized = normalize_name(str(raw_value or ""))
+    if normalized:
+        index[normalized].append(node)
+    return normalized
+
+
+def _add_search_tokens(by_token: dict[str, set[str]], normalized: str, node: str) -> None:
+    for token in normalized.split():
+        by_token[token].add(node)
 
 
 def _ignored_by_name(dump_dir: Path, progress: bool) -> set[int]:
@@ -300,9 +313,14 @@ def _write_artists_and_index(
 ) -> dict[str, int]:
     # Write only artists that actually survived into the graph, plus lookup indexes.
     by_name: dict[str, list[str]] = defaultdict(list)
+    by_sort_name: dict[str, list[str]] = defaultdict(list)
+    by_alias: dict[str, list[str]] = defaultdict(list)
     by_mbid: dict[str, str] = {}
+    by_token: dict[str, set[str]] = defaultdict(set)
     artist_meta: dict[str, dict[str, int | str | None]] = {}
     found = 0
+    aliases_seen = 0
+    aliases_indexed = 0
 
     with (out_dir / artifacts.ARTISTS_FILE).open("w", encoding="utf-8") as handle:
         for count, artist in enumerate(mbdump.iter_artists(dump_dir), 1):
@@ -328,7 +346,10 @@ def _write_artists_and_index(
             }
             artifacts.write_jsonl_item(handle, item)
             artist_meta[node] = item
-            by_name[normalize_name(str(artist["name"]))].append(node)
+            name_key = _add_index_value(by_name, artist["name"], node)
+            _add_search_tokens(by_token, name_key, node)
+            sort_key = _add_index_value(by_sort_name, artist["sort_name"], node)
+            _add_search_tokens(by_token, sort_key, node)
             gid = artist["gid"]
             if isinstance(gid, str) and gid:
                 by_mbid[gid.casefold()] = node
@@ -340,8 +361,31 @@ def _write_artists_and_index(
                     flush=True,
                 )
 
-    for nodes in by_name.values():
-        nodes.sort(
+    for aliases_seen, alias in enumerate(mbdump.iter_artist_aliases(dump_dir), 1):
+        node = artist_node(int(alias["artist_id"]))
+        if node not in artist_meta:
+            if progress and aliases_seen % 1_000_000 == 0:
+                print(
+                    f"artist aliases scanned for search index: {aliases_seen:,}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            continue
+        alias_key = _add_index_value(by_alias, alias["name"], node)
+        _add_search_tokens(by_token, alias_key, node)
+        sort_key = _add_index_value(by_alias, alias["sort_name"], node)
+        _add_search_tokens(by_token, sort_key, node)
+        aliases_indexed += 1
+        if progress and aliases_seen % 1_000_000 == 0:
+            print(
+                f"artist aliases scanned for search index: {aliases_seen:,}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    def sort_nodes(nodes: list[str] | set[str]) -> list[str]:
+        return sorted(
+            set(nodes),
             key=lambda node: (
                 -int(artist_meta[node]["degree"]),
                 str(artist_meta[node]["name"]).casefold(),
@@ -349,16 +393,27 @@ def _write_artists_and_index(
             )
         )
 
+    for index in (by_name, by_sort_name, by_alias):
+        for key, nodes in list(index.items()):
+            index[key] = sort_nodes(nodes)
+
     artifacts.write_json(
         out_dir / artifacts.NAME_INDEX_FILE,
         {
             "by_mbid": by_mbid,
             "by_name": dict(by_name),
+            "by_sort_name": dict(by_sort_name),
+            "by_alias": dict(by_alias),
+            "by_token": {
+                token: sort_nodes(nodes) for token, nodes in sorted(by_token.items())
+            },
         },
     )
     return {
         "artist_nodes": found,
         "used_artist_ids_missing_from_artist_table": len(used_artist_ids) - found,
+        "artist_alias_rows_seen": aliases_seen,
+        "artist_alias_rows_indexed": aliases_indexed,
     }
 
 

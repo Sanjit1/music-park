@@ -21,7 +21,6 @@ from .search import (
     Graph,
     SearchLimitExceeded,
     artist_id_from_node,
-    normalize_name,
 )
 
 # Defaults are overridden by environment variables MCN_GRAPH_DIR and MCN_ALLOWED_ORIGINS
@@ -132,28 +131,9 @@ def create_app(graph_dir: str | Path | None = None, cache_db: str | Path | None 
         q: str = Query(..., min_length=1),
         limit: int = Query(10, ge=1, le=50),
     ) -> dict[str, Any]:
-        query = q.strip()
-        candidates: list[str] = []
-        mbid_match = graph.name_index.get("by_mbid", {}).get(query.casefold())
-        if mbid_match:
-            candidates = [mbid_match]
-        else:
-            by_name = graph.name_index.get("by_name", {})
-            exact = by_name.get(normalize_name(query), [])
-            if exact:
-                candidates = list(exact)
-            else:
-                prefix = normalize_name(query)
-                for name, nodes in by_name.items():
-                    if name.startswith(prefix):
-                        candidates.extend(nodes)
-                        if len(candidates) >= limit:
-                            break
         return {
             "query": q,
-            "candidates": [
-                public_artist(graph.artists[node]) for node in candidates[:limit]
-            ],
+            "candidates": graph.search_artist_candidates(q, limit=limit),
         }
 
     @app.get("/mcn/path")

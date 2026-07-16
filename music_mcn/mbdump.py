@@ -70,6 +70,16 @@ def iter_artists(dump_dir: str | Path) -> Iterator[dict[str, int | str | None]]:
         }
 
 
+def iter_artist_aliases(dump_dir: str | Path) -> Iterator[dict[str, int | str | None]]:
+    # artist_alias: id, artist, name, locale, ..., type, sort_name, ...
+    for line_no, row in iter_rows(dump_dir, "artist_alias", 8):
+        yield {
+            "artist_id": as_int(row[1], "artist_alias", line_no, 1),
+            "name": clean(row[2]) or "",
+            "sort_name": clean(row[7]),
+        }
+
+
 def iter_recordings(dump_dir: str | Path) -> Iterator[dict[str, int | str | None]]:
     # recording: id, gid, name, artist_credit, ...
     for line_no, row in iter_rows(dump_dir, "recording", 4):

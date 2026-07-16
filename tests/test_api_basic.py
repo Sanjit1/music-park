@@ -105,6 +105,16 @@ class TinyGraph:
     def find_artist(self, query):
         return {"A": "a:1", "B": "a:2"}[query]
 
+    def search_artist_candidates(self, query, limit=10):
+        return [
+            {
+                **self.artists["a:1"],
+                "score": 90000,
+                "match_reason": "name_exact",
+                "matched_value": query,
+            }
+        ][:limit]
+
     def shortest_path(self, source, target, max_search_ms=None, max_expanded_nodes=None):
         if self.limit:
             raise SearchLimitExceeded(
@@ -168,6 +178,13 @@ def test_health_with_tiny_graph(monkeypatch, tmp_path):
     data = route(app, "/health")()
     assert data["status"] == "ok"
     assert data["limits"]["max_concurrent_searches"] >= 1
+
+
+def test_artist_search_route_uses_graph_search(monkeypatch, tmp_path):
+    app = tiny_app(monkeypatch, tmp_path, TinyGraph())
+    data = route(app, "/artists/search")(q="A", limit=10)
+    assert data["candidates"][0]["node"] == "a:1"
+    assert data["candidates"][0]["match_reason"] == "name_exact"
 
 
 def test_shortest_dag_with_tiny_graph(monkeypatch, tmp_path):

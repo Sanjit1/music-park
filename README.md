@@ -4,6 +4,7 @@ Search and graph tooling for the Music Collaboration Number (MCN) / Springsteen 
 - `recording`
 - `artist_credit_name`
 - `artist`
+- `artist_alias` for local search aliases
 - `link_type`
 - `link`
 - `l_artist_artist`
@@ -198,6 +199,9 @@ A local api is available as a FastAPI wrapper around the search tool. It can be 
 ```bash
 python scripts/run_api.py --graph data/artifacts/current --host 127.0.0.1 --port 8000
 ```
+
+`GET /artists/search?q=m%20shadows` searches only artists present in the generated graph, without calling MusicBrainz. Queries are normalized for case, accents, punctuation, underscores, and whitespace, then matched against MBIDs, names, sort names, aliases, and tokens. Exact, prefix, and token matches rank ahead of substring fallbacks; alias substrings are last so `7x` can find alias `a7x` without beating cleaner matches. Rebuild the graph after search-index changes so `name_index.json` includes aliases and token indexes.
+
 You can run it as a service:
 ```bash
 sudo cp deploy/music-mcn-api.service.example /etc/systemd/system/music-mcn-api.service

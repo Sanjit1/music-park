@@ -4,6 +4,7 @@ import argparse
 import re
 import sys
 import time
+import unicodedata
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,18 @@ MEMBERSHIP_PREFIX = "m:"
 
 
 def normalize_name(name: str) -> str:
-    return re.sub(r"\s+", " ", name.strip().casefold())
+    decomposed = unicodedata.normalize("NFKD", name.strip().casefold())
+    without_marks = "".join(
+        char for char in decomposed if not unicodedata.combining(char)
+    )
+    without_punctuation = re.sub(r"[^\w\s]+", " ", without_marks)
+    without_underscores = without_punctuation.replace("_", " ")
+    return re.sub(r"\s+", " ", without_underscores).strip()
+
+
+def search_tokens(query: str) -> list[str]:
+    normalized = normalize_name(query)
+    return normalized.split() if normalized else []
 
 
 class ArtistLookupError(RuntimeError):
@@ -87,7 +99,7 @@ class Graph:
             return mbid_match
 
         by_name = self.name_index.get("by_name", {})
-        candidates = list(by_name.get(re.sub(r"\s+", " ", query.strip().casefold()), []))
+        candidates = list(by_name.get(normalize_name(query), []))
         if not candidates:
             raise ArtistNotFoundError(query)
 
@@ -113,6 +125,255 @@ class Graph:
         if candidate_best is not None:
             return candidate_best
         raise AmbiguousArtistError(query, self.artist_candidates(candidates))
+
+    def search_artist_candidates(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        stripped = query.strip()
+        if not stripped:
+            return []
+
+        limit = max(1, limit)
+        normalized = normalize_name(stripped)
+        tokens = normalized.split()
+        candidate_scores: dict[str, dict[str, Any]] = {}
+
+        def add_node(
+            node: str,
+            score: int,
+            reason: str,
+            matched_value: str | None = None,
+        ) -> None:
+            if node not in self.artists:
+                return
+            current = candidate_scores.get(node)
+            if current is None or score > int(current["score"]):
+                candidate_scores[node] = {
+                    "node": node,
+                    "score": score,
+                    "match_reason": reason,
+                    "matched_value": matched_value,
+                }
+
+        def add_nodes(
+            nodes: list[str],
+            score: int,
+            reason: str,
+            matched_value: str | None = None,
+            cap: int | None = None,
+        ) -> None:
+            for index, node in enumerate(nodes):
+                if cap is not None and index >= cap:
+                    break
+                add_node(node, score, reason, matched_value)
+
+        def ranked_rows() -> list[dict[str, Any]]:
+            ranked = sorted(
+                candidate_scores.values(),
+                key=lambda item: (
+                    -int(item["score"]),
+                    -int(self.artists[item["node"]].get("degree", 0)),
+                    str(self.artists[item["node"]].get("name", "")).casefold(),
+                    item["node"],
+                ),
+            )
+            rows = []
+            for item in ranked[:limit]:
+                artist = dict(self.artists.get(item["node"], {}))
+                artist["score"] = item["score"]
+                artist["match_reason"] = item["match_reason"]
+                artist["matched_value"] = item["matched_value"]
+                rows.append(self._public_artist_candidate(item["node"], artist))
+            return rows
+
+        by_mbid = self.name_index.get("by_mbid", {})
+        mbid_match = by_mbid.get(stripped.casefold())
+        if mbid_match:
+            add_node(mbid_match, 100_000, "mbid_exact", stripped)
+
+        by_name = self.name_index.get("by_name", {})
+        by_sort_name = self.name_index.get("by_sort_name", {})
+        by_alias = self.name_index.get("by_alias", {})
+        by_token = self.name_index.get("by_token", {})
+        pool_cap = max(limit * 100, 500)
+
+        add_nodes(list(by_name.get(normalized, [])), 90_000, "name_exact", stripped)
+        add_nodes(
+            list(by_sort_name.get(normalized, [])),
+            85_000,
+            "sort_name_exact",
+            stripped,
+        )
+        add_nodes(list(by_alias.get(normalized, [])), 80_000, "alias_exact", stripped)
+
+        if candidate_scores:
+            return ranked_rows()
+
+        self._add_prefix_matches(
+            by_name,
+            normalized,
+            add_node,
+            score=70_000,
+            reason="name_prefix",
+            cap=pool_cap,
+        )
+        self._add_prefix_matches(
+            by_sort_name,
+            normalized,
+            add_node,
+            score=65_000,
+            reason="sort_name_prefix",
+            cap=pool_cap,
+        )
+        self._add_prefix_matches(
+            by_alias,
+            normalized,
+            add_node,
+            score=60_000,
+            reason="alias_prefix",
+            cap=pool_cap,
+        )
+
+        exact_token_nodes = self._nodes_matching_all_tokens(by_token, tokens)
+        add_nodes(exact_token_nodes, 50_000, "all_tokens", normalized, cap=pool_cap)
+
+        prefix_token_nodes = self._nodes_matching_token_prefixes(by_token, tokens, pool_cap)
+        add_nodes(
+            prefix_token_nodes,
+            40_000,
+            "token_prefix",
+            normalized,
+            cap=pool_cap,
+        )
+
+        self._add_substring_matches(
+            by_name,
+            normalized,
+            add_node,
+            score=30_000,
+            reason="name_contains",
+            cap=pool_cap,
+            min_length=3,
+        )
+        self._add_substring_matches(
+            by_sort_name,
+            normalized,
+            add_node,
+            score=25_000,
+            reason="sort_name_contains",
+            cap=pool_cap,
+            min_length=3,
+        )
+        self._add_substring_matches(
+            by_alias,
+            normalized,
+            add_node,
+            score=1_000,
+            reason="alias_contains_fallback",
+            cap=pool_cap,
+            min_length=2,
+        )
+
+        return ranked_rows()
+
+    def _public_artist_candidate(self, node: str, artist: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "node": node,
+            "name": artist.get("name"),
+            "sort_name": artist.get("sort_name"),
+            "gid": artist.get("gid"),
+            "comment": artist.get("comment"),
+            "degree": artist.get("degree", len(self.adjacency.get(node, []))),
+            "score": artist.get("score"),
+            "match_reason": artist.get("match_reason"),
+            "matched_value": artist.get("matched_value"),
+        }
+
+    def _add_prefix_matches(
+        self,
+        index: dict[str, list[str]],
+        normalized: str,
+        add_node,
+        score: int,
+        reason: str,
+        cap: int,
+    ) -> None:
+        if not normalized:
+            return
+        added = 0
+        for value, nodes in index.items():
+            if not value.startswith(normalized) or value == normalized:
+                continue
+            for node in nodes:
+                add_node(node, score, reason, value)
+                added += 1
+                if added >= cap:
+                    return
+
+    def _add_substring_matches(
+        self,
+        index: dict[str, list[str]],
+        normalized: str,
+        add_node,
+        score: int,
+        reason: str,
+        cap: int,
+        min_length: int,
+    ) -> None:
+        if len(normalized) < min_length:
+            return
+        added = 0
+        for value, nodes in index.items():
+            if value == normalized or normalized not in value:
+                continue
+            for node in nodes:
+                add_node(node, score, reason, value)
+                added += 1
+                if added >= cap:
+                    return
+
+    def _nodes_matching_all_tokens(
+        self, by_token: dict[str, list[str]], tokens: list[str]
+    ) -> list[str]:
+        if not tokens:
+            return []
+        node_sets = [set(by_token.get(token, [])) for token in tokens]
+        if not node_sets or any(not nodes for nodes in node_sets):
+            return []
+        matches = set.intersection(*node_sets)
+        return self._rank_nodes(matches)
+
+    def _nodes_matching_token_prefixes(
+        self,
+        by_token: dict[str, list[str]],
+        tokens: list[str],
+        cap: int,
+    ) -> list[str]:
+        if not tokens:
+            return []
+        node_sets: list[set[str]] = []
+        for query_token in tokens:
+            matches: set[str] = set()
+            if len(query_token) == 1:
+                matches.update(by_token.get(query_token, []))
+            else:
+                for token, nodes in by_token.items():
+                    if token.startswith(query_token):
+                        matches.update(nodes)
+                        if len(matches) >= cap:
+                            break
+            if not matches:
+                return []
+            node_sets.append(matches)
+        return self._rank_nodes(set.intersection(*node_sets))
+
+    def _rank_nodes(self, nodes) -> list[str]:
+        return sorted(
+            nodes,
+            key=lambda node: (
+                -int(self.artists.get(node, {}).get("degree", 0)),
+                str(self.artists.get(node, {}).get("name", "")).casefold(),
+                node,
+            ),
+        )
 
     def _unique_best_by_degree(self, nodes: list[str]) -> str | None: # Pick the artist with the highest degree, or None if there is a tie for best
         if not nodes:
