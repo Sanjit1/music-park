@@ -15,6 +15,9 @@ from . import artifacts
 ARTIST_PREFIX = "a:"
 RECORDING_PREFIX = "r:"
 MEMBERSHIP_PREFIX = "m:"
+FALLBACK_ARTIST_ALIASES = {
+    "a7x": "avenged sevenfold",
+}
 
 
 def normalize_name(name: str) -> str:
@@ -99,8 +102,15 @@ class Graph:
             return mbid_match
 
         by_name = self.name_index.get("by_name", {})
-        candidates = list(by_name.get(normalize_name(query), []))
+        normalized = normalize_name(query)
+        candidates = list(by_name.get(normalized, []))
         if not candidates:
+            alias_candidates = self._alias_nodes(normalized)
+            alias_best = self._unique_best_by_degree(alias_candidates)
+            if alias_best is not None:
+                return alias_best
+            if alias_candidates:
+                raise AmbiguousArtistError(query, self.artist_candidates(alias_candidates))
             raise ArtistNotFoundError(query)
 
         exact = [node for node in candidates if self.artists[node].get("name") == query]
@@ -203,6 +213,7 @@ class Graph:
             stripped,
         )
         add_nodes(list(by_alias.get(normalized, [])), 80_000, "alias_exact", stripped)
+        add_nodes(self._fallback_alias_nodes(normalized), 80_000, "alias_exact", stripped)
 
         if candidate_scores:
             return ranked_rows()
@@ -375,6 +386,16 @@ class Graph:
             ),
         )
 
+    def _alias_nodes(self, normalized_alias: str) -> list[str]:
+        nodes = list(self.name_index.get("by_alias", {}).get(normalized_alias, []))
+        return nodes or self._fallback_alias_nodes(normalized_alias)
+
+    def _fallback_alias_nodes(self, normalized_alias: str) -> list[str]:
+        canonical = FALLBACK_ARTIST_ALIASES.get(normalized_alias)
+        if canonical is None:
+            return []
+        return list(self.name_index.get("by_name", {}).get(canonical, []))
+
     def _unique_best_by_degree(self, nodes: list[str]) -> str | None: # Pick the artist with the highest degree, or None if there is a tie for best
         if not nodes:
             return None
@@ -458,6 +479,54 @@ class Graph:
                 return self._build_path(meeting, forward_parent, backward_parent)
         return None
 
+    def is_connected(
+        self,
+        source: str,
+        target: str,
+        max_search_ms: int | None = None,
+        max_expanded_nodes: int | None = None,
+    ) -> bool:
+        if source == target:
+            return True
+        if source not in self.adjacency or target not in self.adjacency:
+            return False
+
+        deadline = (
+            time.perf_counter() + (max_search_ms / 1000)
+            if max_search_ms is not None
+            else None
+        )
+        expanded_nodes = 0
+        forward_seen = {source}
+        backward_seen = {target}
+        forward_queue: deque[str] = deque([source])
+        backward_queue: deque[str] = deque([target])
+
+        while forward_queue and backward_queue:
+            if len(forward_queue) <= len(backward_queue):
+                found, expanded_nodes = self._expand_connected_frontier(
+                    forward_queue,
+                    forward_seen,
+                    backward_seen,
+                    deadline,
+                    expanded_nodes,
+                    max_expanded_nodes,
+                    max_search_ms,
+                )
+            else:
+                found, expanded_nodes = self._expand_connected_frontier(
+                    backward_queue,
+                    backward_seen,
+                    forward_seen,
+                    deadline,
+                    expanded_nodes,
+                    max_expanded_nodes,
+                    max_search_ms,
+                )
+            if found:
+                return True
+        return False
+
     def _expand_frontier(
         self,
         queue: deque[str],
@@ -504,6 +573,53 @@ class Graph:
                     return neighbor, expanded_nodes
                 queue.append(neighbor)
         return None, expanded_nodes
+
+    def _expand_connected_frontier(
+        self,
+        queue: deque[str],
+        this_seen: set[str],
+        other_seen: set[str],
+        deadline: float | None = None,
+        expanded_nodes: int = 0,
+        max_expanded_nodes: int | None = None,
+        max_search_ms: int | None = None,
+    ) -> tuple[bool, int]:
+        for _ in range(len(queue)):
+            if deadline is not None and time.perf_counter() > deadline:
+                raise SearchLimitExceeded(
+                    "Search exceeded configured time limit.",
+                    expanded_nodes,
+                    max_expanded_nodes,
+                    max_search_ms,
+                )
+            if max_expanded_nodes is not None and expanded_nodes >= max_expanded_nodes:
+                raise SearchLimitExceeded(
+                    "Search exceeded configured expanded-node limit.",
+                    expanded_nodes,
+                    max_expanded_nodes,
+                    max_search_ms,
+                )
+            node = queue.popleft()
+            expanded_nodes += 1
+            for index, neighbor in enumerate(self.adjacency.get(node, []), 1):
+                if (
+                    index % 1000 == 0
+                    and deadline is not None
+                    and time.perf_counter() > deadline
+                ):
+                    raise SearchLimitExceeded(
+                        "Search exceeded configured time limit.",
+                        expanded_nodes,
+                        max_expanded_nodes,
+                        max_search_ms,
+                    )
+                if neighbor in this_seen:
+                    continue
+                if neighbor in other_seen:
+                    return True, expanded_nodes
+                this_seen.add(neighbor)
+                queue.append(neighbor)
+        return False, expanded_nodes
 
     def _build_path(
         self,

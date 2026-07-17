@@ -83,7 +83,41 @@ def test_artist_search_ranks_exact_alias_and_fallback_matches():
     a7x = graph.search_artist_candidates("a7x", limit=5)
     assert a7x[0]["node"] == "a:3"
     assert a7x[0]["match_reason"] == "alias_exact"
+    assert graph.find_artist("a7x") == "a:3"
 
     short_alias_piece = graph.search_artist_candidates("7x", limit=5)
     assert short_alias_piece[0]["node"] == "a:3"
     assert short_alias_piece[0]["match_reason"] == "alias_contains_fallback"
+
+
+def test_artist_search_uses_fallback_alias_for_older_indexes():
+    graph = Graph(
+        Path("tiny"),
+        adjacency={"a:3": ["r:3"]},
+        artists={
+            "a:3": {
+                "node": "a:3",
+                "artist_id": 3,
+                "gid": "avenged-sevenfold",
+                "name": "Avenged Sevenfold",
+                "sort_name": "Avenged Sevenfold",
+                "degree": 200,
+            },
+        },
+        name_index={
+            "by_mbid": {},
+            "by_name": {"avenged sevenfold": ["a:3"]},
+            "by_sort_name": {"avenged sevenfold": ["a:3"]},
+            "by_alias": {},
+            "by_token": {
+                "avenged": ["a:3"],
+                "sevenfold": ["a:3"],
+            },
+        },
+        meta={},
+    )
+
+    a7x = graph.search_artist_candidates("a7x", limit=5)
+    assert a7x[0]["node"] == "a:3"
+    assert a7x[0]["match_reason"] == "alias_exact"
+    assert graph.find_artist("a7x") == "a:3"

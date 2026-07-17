@@ -30,6 +30,7 @@ DEFAULT_ALLOWED_ORIGINS = [
     "http://127.0.0.1:4321",
 ]
 LOGGER = logging.getLogger("music_mcn.api")
+MAIN_GRAPH_ANCHOR = "Bruce Springsteen"
 
 # Utility functions for reading environment variables with different type conversion and defaults
 def env_int(name: str, default: int) -> int:
@@ -229,13 +230,12 @@ def create_app(graph_dir: str | Path | None = None, cache_db: str | Path | None 
                     source_node,
                     target_node,
                 )
-                raise HTTPException(
-                    status_code=404,
-                    detail={
-                        "error": "no_path_found",
-                        "source": public_artist(graph.artists[source_node]),
-                        "target": public_artist(graph.artists[target_node]),
-                    },
+                raise _no_path_exception(
+                    graph,
+                    source_node,
+                    target_node,
+                    max_search_ms,
+                    max_expanded_nodes,
                 )
 
             payload = graph.path_payload(source_node, target_node, path)
@@ -359,13 +359,12 @@ def create_app(graph_dir: str | Path | None = None, cache_db: str | Path | None 
                     target_node,
                     event="mcn_shortest_dag",
                 )
-                raise HTTPException(
-                    status_code=404,
-                    detail={
-                        "error": "no_path_found",
-                        "source": public_artist(graph.artists[source_node]),
-                        "target": public_artist(graph.artists[target_node]),
-                    },
+                raise _no_path_exception(
+                    graph,
+                    source_node,
+                    target_node,
+                    max_search_ms,
+                    max_expanded_nodes,
                 )
 
             try:
@@ -412,13 +411,12 @@ def create_app(graph_dir: str | Path | None = None, cache_db: str | Path | None 
                     target_node,
                     event="mcn_shortest_dag",
                 )
-                raise HTTPException(
-                    status_code=404,
-                    detail={
-                        "error": "no_path_found",
-                        "source": public_artist(graph.artists[source_node]),
-                        "target": public_artist(graph.artists[target_node]),
-                    },
+                raise _no_path_exception(
+                    graph,
+                    source_node,
+                    target_node,
+                    max_search_ms,
+                    max_expanded_nodes,
                 )
 
             payload["graph_version"] = version
@@ -452,6 +450,128 @@ def create_app(graph_dir: str | Path | None = None, cache_db: str | Path | None 
         }
 
     return app
+
+
+def _no_path_exception(
+    graph: Graph,
+    source_node: str,
+    target_node: str,
+    max_search_ms: int | None,
+    max_expanded_nodes: int | None,
+) -> HTTPException:
+    try:
+        return HTTPException(
+            status_code=404,
+            detail=_no_path_detail(
+                graph,
+                source_node,
+                target_node,
+                max_search_ms,
+                max_expanded_nodes,
+            ),
+        )
+    except SearchLimitExceeded as exc:
+        return HTTPException(
+            status_code=504,
+            detail={
+                "error": "search_limit_exceeded",
+                "message": "Search exceeded configured limits.",
+                "limits": {
+                    "max_search_ms": max_search_ms,
+                    "max_expanded_nodes": max_expanded_nodes,
+                    "expanded_nodes": exc.expanded_nodes,
+                },
+            },
+        )
+
+
+def _no_path_detail(
+    graph: Graph,
+    source_node: str,
+    target_node: str,
+    max_search_ms: int | None,
+    max_expanded_nodes: int | None,
+) -> dict[str, Any]:
+    source = public_artist(graph.artists[source_node])
+    target = public_artist(graph.artists[target_node])
+    detail = {
+        "error": "no_path_found",
+        "source": source,
+        "target": target,
+    }
+    connectivity = _main_graph_connectivity(
+        graph,
+        source_node,
+        target_node,
+        max_search_ms,
+        max_expanded_nodes,
+    )
+    if connectivity is not None:
+        detail["main_graph"] = connectivity
+        detail["message"] = _main_graph_message(source, target, connectivity)
+    return detail
+
+
+def _main_graph_connectivity(
+    graph: Graph,
+    source_node: str,
+    target_node: str,
+    max_search_ms: int | None,
+    max_expanded_nodes: int | None,
+) -> dict[str, Any] | None:
+    try:
+        anchor_node = graph.find_artist(MAIN_GRAPH_ANCHOR)
+    except ArtistLookupError:
+        return None
+
+    source_connected = graph.is_connected(
+        source_node,
+        anchor_node,
+        max_search_ms=max_search_ms,
+        max_expanded_nodes=max_expanded_nodes,
+    )
+    # A no-path result means both artists cannot be in Bruce's component.
+    target_connected = False
+    if not source_connected:
+        target_connected = graph.is_connected(
+            target_node,
+            anchor_node,
+            max_search_ms=max_search_ms,
+            max_expanded_nodes=max_expanded_nodes,
+        )
+
+    disconnected = []
+    if not source_connected:
+        disconnected.append("source")
+    if not target_connected:
+        disconnected.append("target")
+    return {
+        "anchor": MAIN_GRAPH_ANCHOR,
+        "source_connected": source_connected,
+        "target_connected": target_connected,
+        "disconnected": disconnected,
+    }
+
+
+def _main_graph_message(
+    source: dict[str, Any],
+    target: dict[str, Any],
+    connectivity: dict[str, Any],
+) -> str:
+    disconnected_names = []
+    if not connectivity["source_connected"]:
+        disconnected_names.append(str(source.get("name") or "Source"))
+    if not connectivity["target_connected"]:
+        disconnected_names.append(str(target.get("name") or "Target"))
+    if len(disconnected_names) == 1:
+        return f"{disconnected_names[0]} is not connected to the main graph."
+    if len(disconnected_names) == 2:
+        return (
+            f"{disconnected_names[0]} and {disconnected_names[1]} are not connected "
+            "to the main graph."
+        )
+    return "No path found."
+
 
 # ? ------------------------------------------- Log stuff
 def _artist_log_fields(graph: Graph, node: str, prefix: str) -> dict[str, Any]:

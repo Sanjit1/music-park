@@ -5,6 +5,12 @@ Search and graph tooling for the Music Collaboration Number (MCN) / Springsteen 
 - `artist_credit_name`
 - `artist`
 - `artist_alias` for local search aliases
+- `release_group`
+- `release`
+- `medium`
+- `track`
+- `label`
+- `release_label`
 - `link_type`
 - `link`
 - `l_artist_artist`
@@ -152,7 +158,7 @@ A4 --- M1
 ```
 
 
-The graph is built using `python scripts/build_graph.py --dump-dir data/mbdump --out data/artifacts/graph`. This builds the graph while ignoring artists with more than 100,000 recordings and artists with "various" in their name.
+The graph is built using `python scripts/build_graph.py --dump-dir data/mbdump --out data/artifacts/graph`. This builds the graph while filtering MusicBrainz special-purpose artist MBIDs, special-purpose track titles, and release contexts whose track, release, release-group, or rejected label metadata points at those special-purpose entities. A recording is kept when it has at least one acceptable non-filtered release context.
 
 Instead of downloading the graph builder and building the graph manually, you can just run `scripts/refresh_graph.py` to download the latest graph artifact from the web app. This script will download the latest graph artifact and store it in `data/artifacts/current`. It will also keep the last 2 versions of the graph artifact and delete older versions. The script can be run as:
 ```bash
@@ -270,10 +276,4 @@ This is as of July 2026
 | Member-of-Band Link Type IDs | `103` |
 
 ### Artist Filtering
-| Metric | Value |
-|-------|------:|
-| Artists Over Recording Limit | 1 |
-| Ignored Artists (Has "various" in Name) | 48 |
-| Ignored Artists (Over 100,000 Recording Limit) | 1 |
-| **Total Ignored Artists** | **49** |
-| Used Artist IDs Missing from Artist Table | 0 |
+Current builds report filtering details in `meta.json`, including configured/found special-purpose artist MBIDs, artist credits containing those artists, accepted release contexts, rejected track/recording titles, and rejected `[unknown]` / MusicBrainz test-label release contexts. `[no label]` is not rejected automatically.

@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from music_mcn.api import create_app
-from music_mcn.search import SearchLimitExceeded
+from music_mcn.search import Graph, SearchLimitExceeded
 
 
 EXPECTED_FILES = ["meta.json", "artists.jsonl", "connectors.jsonl", "adjacency.pkl"]
@@ -142,6 +142,55 @@ class TinyGraph:
         }
 
 
+def disconnected_graph() -> Graph:
+    artists = {
+        "a:1": {
+            "node": "a:1",
+            "artist_id": 1,
+            "name": "Bruce Springsteen",
+            "degree": 1,
+        },
+        "a:2": {"node": "a:2", "artist_id": 2, "name": "Eminem", "degree": 1},
+        "a:3": {
+            "node": "a:3",
+            "artist_id": 3,
+            "name": "Miss Construction",
+            "degree": 1,
+        },
+        "a:4": {
+            "node": "a:4",
+            "artist_id": 4,
+            "name": "Jack Stauber",
+            "degree": 1,
+        },
+    }
+    adjacency = {
+        "a:1": ["r:1"],
+        "r:1": ["a:1", "a:2"],
+        "a:2": ["r:1"],
+        "a:3": ["r:2"],
+        "r:2": ["a:3"],
+        "a:4": ["r:3"],
+        "r:3": ["a:4"],
+    }
+    name_index = {
+        "by_mbid": {},
+        "by_name": {
+            "bruce springsteen": ["a:1"],
+            "eminem": ["a:2"],
+            "miss construction": ["a:3"],
+            "jack stauber": ["a:4"],
+        },
+    }
+    meta = {
+        "graph_version": "disconnected-v1",
+        "artist_nodes": 4,
+        "connector_nodes": 3,
+        "raw_bipartite_edges": 6,
+    }
+    return Graph(Path("disconnected"), adjacency, artists, name_index, meta)
+
+
 def route(app, path: str):
     return next(item.endpoint for item in app.routes if getattr(item, "path", None) == path)
 
@@ -236,3 +285,41 @@ def test_search_limit_handling(monkeypatch, tmp_path):
         route(app, "/mcn/path")(source="A", target="B")
     assert exc.value.status_code == 504
     assert exc.value.detail["error"] == "search_limit_exceeded"
+
+
+def test_no_path_reports_source_outside_main_graph(monkeypatch, tmp_path):
+    app = tiny_app(monkeypatch, tmp_path, disconnected_graph())
+
+    with pytest.raises(HTTPException) as exc:
+        route(app, "/mcn/path")(source="Miss Construction", target="Eminem")
+
+    assert exc.value.status_code == 404
+    detail = exc.value.detail
+    assert detail["error"] == "no_path_found"
+    assert detail["main_graph"] == {
+        "anchor": "Bruce Springsteen",
+        "source_connected": False,
+        "target_connected": True,
+        "disconnected": ["source"],
+    }
+    assert detail["message"] == "Miss Construction is not connected to the main graph."
+
+
+def test_no_path_reports_both_artists_outside_main_graph(monkeypatch, tmp_path):
+    app = tiny_app(monkeypatch, tmp_path, disconnected_graph())
+
+    with pytest.raises(HTTPException) as exc:
+        route(app, "/mcn/path")(source="Miss Construction", target="Jack Stauber")
+
+    assert exc.value.status_code == 404
+    detail = exc.value.detail
+    assert detail["main_graph"] == {
+        "anchor": "Bruce Springsteen",
+        "source_connected": False,
+        "target_connected": False,
+        "disconnected": ["source", "target"],
+    }
+    assert (
+        detail["message"]
+        == "Miss Construction and Jack Stauber are not connected to the main graph."
+    )
