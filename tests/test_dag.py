@@ -28,12 +28,12 @@ class TinyDagGraph:
             "a:4": ["r:16"],
         }
         self.artists = {
-            "a:1": {"node": "a:1", "artist_id": 1, "name": "Source", "degree": 3},
-            "a:2": {"node": "a:2", "artist_id": 2, "name": "Middle A", "degree": 3},
-            "a:3": {"node": "a:3", "artist_id": 3, "name": "Middle B", "degree": 2},
-            "a:4": {"node": "a:4", "artist_id": 4, "name": "Dead End", "degree": 1},
-            "a:5": {"node": "a:5", "artist_id": 5, "name": "Long Route", "degree": 2},
-            "a:9": {"node": "a:9", "artist_id": 9, "name": "Target", "degree": 3},
+            "a:1": {"node": "a:1", "artist_id": 1, "name": "Source", "degree": 3, "artist_type": "Person"},
+            "a:2": {"node": "a:2", "artist_id": 2, "name": "Middle A", "degree": 3, "artist_type": "Group"},
+            "a:3": {"node": "a:3", "artist_id": 3, "name": "Middle B", "degree": 2, "artist_type": "Group"},
+            "a:4": {"node": "a:4", "artist_id": 4, "name": "Dead End", "degree": 1, "artist_type": "Person"},
+            "a:5": {"node": "a:5", "artist_id": 5, "name": "Long Route", "degree": 2, "artist_type": "Group"},
+            "a:9": {"node": "a:9", "artist_id": 9, "name": "Target", "degree": 3, "artist_type": "Person"},
         }
         self.connectors = {
             node: {
@@ -84,6 +84,8 @@ def test_shortest_dag_layers_and_full_shortest_nodes():
     assert layers[2] == {"a:2", "a:3"}
     assert layers[3] == {"r:12", "r:13"}
     assert layers[4] == {"a:9"}
+    assert payload["layers"][0]["nodes"][0]["artist_type"] == "Person"
+    assert payload["layers"][2]["nodes"][0]["artist_type"] == "Group"
     assert payload["raw_distance"] == 4
     assert payload["mcn_hops"] == 2
 
@@ -175,3 +177,25 @@ def test_count_cap_comes_from_env(monkeypatch):
     assert source_node["score"] == 1
     assert target_node["score"] == 1
     assert payload["stats"]["count_cap"] == 1
+
+
+def test_unhydrated_alternate_connector_nodes_are_excluded():
+    graph = TinyDagGraph()
+    graph.connectors.pop("r:13", None)
+    payload = build_shortest_dag(
+        graph,
+        "a:1",
+        "a:9",
+        canonical_path=CANONICAL_PATH,
+        limit_per_layer=10,
+        max_total_nodes=50,
+    )
+
+    returned_nodes = {
+        node["node"]
+        for layer in payload["layers"]
+        for node in layer["nodes"]
+    }
+    assert "r:13" not in returned_nodes
+    assert "a:3" not in returned_nodes
+    assert payload["stats"]["dropped_unhydrated_nodes"] == 1

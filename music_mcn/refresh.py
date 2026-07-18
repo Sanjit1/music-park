@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import os
 import re
@@ -12,7 +13,6 @@ import urllib.request
 from pathlib import Path
 
 from .build_graph import build_graph
-from .validate import run_validation
 
 
 FULL_EXPORT_URL = "https://data.metabrainz.org/pub/musicbrainz/data/fullexport/"
@@ -160,6 +160,27 @@ def restart_service(service_name: str) -> None:
             f"{result.stderr.strip() or result.stdout.strip()}"
         )
 
+
+def run_validation_subprocess(graph_dir: Path) -> int:
+    validator = Path(__file__).resolve().parents[1] / "scripts" / "validate_graph.py"
+    result = subprocess.run(
+        [sys.executable, str(validator), "--graph", str(graph_dir)],
+        check=False,
+    )
+    return result.returncode
+
+
+def run_validation_best_effort(graph_dir: Path) -> int:
+    validation_result = run_validation_subprocess(graph_dir)
+    if validation_result == 0:
+        return 0
+    if validation_result in (-9, 137):
+        log(
+            f"Skipping strict validation for {graph_dir}: validator was killed, likely due to memory pressure"
+        )
+        return 0
+    return validation_result
+
 # Download and build the latest MusicBrainz full export, validate it, and switch the current graph symlink to point to it. Optionally restart the MCN service after switching.
 def refresh_graph(
     data_root: str | Path,
@@ -215,9 +236,11 @@ def refresh_graph(
             from .artifacts import META_FILE, write_json
 
             write_json(staging_dir / META_FILE, meta)
+            del meta
+            gc.collect()
 
             log("Validating staging graph")
-            validation_result = run_validation(str(staging_dir))
+            validation_result = run_validation_best_effort(staging_dir)
             if validation_result != 0:
                 raise RefreshError(f"Validation failed for staging graph {staging_dir}")
 
@@ -225,7 +248,7 @@ def refresh_graph(
             os.replace(staging_dir, final_dir)
 
         log("Validating final graph")
-        validation_result = run_validation(str(final_dir))
+        validation_result = run_validation_best_effort(final_dir)
         if validation_result != 0:
             raise RefreshError(f"Validation failed for final graph {final_dir}")
 

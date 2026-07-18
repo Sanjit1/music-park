@@ -59,13 +59,16 @@ def iter_rows(
 
 
 def iter_artists(dump_dir: str | Path) -> Iterator[dict[str, int | str | None]]:
-    # artist: id, gid, name, sort_name, ..., comment, ...
+    # artist: id, gid, name, sort_name, ..., type, ..., comment, ...
     for line_no, row in iter_rows(dump_dir, "artist", 14):
         yield {
             "artist_id": as_int(row[0], "artist", line_no, 0),
             "gid": clean(row[1]),
             "name": clean(row[2]) or "",
             "sort_name": clean(row[3]),
+            "artist_type": as_int(row[10], "artist", line_no, 10)
+            if clean(row[10]) is not None
+            else None,
             "comment": clean(row[13]),
         }
 

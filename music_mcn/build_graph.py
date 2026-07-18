@@ -75,6 +75,12 @@ artist_node = lambda artist_id: f"{ARTIST_PREFIX}{artist_id}"
 recording_node = lambda recording_id: f"{RECORDING_PREFIX}{recording_id}"
 membership_node = lambda relationship_id: f"{MEMBERSHIP_PREFIX}{relationship_id}"
 
+
+def _artist_type_label(artist_type: int | None) -> str | None:
+    if artist_type == 1:
+        return "Person"
+    return "Group"
+
 def _add_edge(adjacency: dict[str, list[str]], left: str, right: str) -> None:
     adjacency.setdefault(left, []).append(right)
     adjacency.setdefault(right, []).append(left)
@@ -464,6 +470,7 @@ def _write_artists_and_index(
                 "gid": artist["gid"],
                 "name": artist["name"],
                 "sort_name": artist["sort_name"],
+                "artist_type": _artist_type_label(artist.get("artist_type")),
                 "comment": artist["comment"],
                 "degree": len(adjacency.get(node, [])),
             }

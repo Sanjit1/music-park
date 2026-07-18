@@ -5,11 +5,11 @@ __pycache__/
 
 data/artifacts/*
 !data/artifacts/.gitkeep
-
 data/cache/
 data/downloads/
 data/locks/
 data/mbdump/*
 !data/mbdump/.gitkeep
+data/neighbors/
 data/work/
 deploy/.env

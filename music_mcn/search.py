@@ -292,6 +292,7 @@ class Graph:
             "sort_name": artist.get("sort_name"),
             "gid": artist.get("gid"),
             "comment": artist.get("comment"),
+            "artist_type": artist.get("artist_type"),
             "degree": artist.get("degree", len(self.adjacency.get(node, []))),
             "score": artist.get("score"),
             "match_reason": artist.get("match_reason"),
@@ -426,6 +427,7 @@ class Graph:
                     "sort_name": artist.get("sort_name"),
                     "gid": artist.get("gid"),
                     "comment": artist.get("comment"),
+                    "artist_type": artist.get("artist_type"),
                     "degree": artist.get("degree", len(self.adjacency.get(node, []))),
                 }
             )

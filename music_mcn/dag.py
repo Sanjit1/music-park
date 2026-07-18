@@ -19,6 +19,7 @@ from .search import (
 
 DEFAULT_COUNT_CAP = 1_000_000_000
 COUNT_CAP_ENV = "MCN_DAG_COUNT_CAP"
+EXTRA_CONNECTOR_HYDRATION_MS = 1000
 
 
 def build_shortest_dag(
@@ -151,14 +152,39 @@ def build_shortest_dag(
     )
 
     canonical_payload = graph.path_payload(source, target, canonical_path)
+    connector_deadline = None
+    if deadline is not None:
+        connector_deadline = deadline + (EXTRA_CONNECTOR_HYDRATION_MS / 1000)
+
     connector_metadata_truncated = _ensure_extra_connectors_best_effort(
         graph,
         sorted(
             selected_nodes - forced_nodes,
             key=lambda node: (dist_s.get(node, raw_distance + 1), node),
         ),
-        deadline,
+        connector_deadline,
     )
+    unhydrated_nodes = {
+        node
+        for node in (selected_nodes - forced_nodes)
+        if not node.startswith(ARTIST_PREFIX) and node not in graph.connectors
+    }
+    if unhydrated_nodes:
+        selected_nodes = {
+            node for node in selected_nodes if node not in unhydrated_nodes
+        }
+        selected_edges = [
+            (left, right)
+            for left, right in selected_edges
+            if left not in unhydrated_nodes and right not in unhydrated_nodes
+        ]
+        selected_nodes, selected_edges = _prune_selected_subgraph(
+            source,
+            target,
+            forced_nodes,
+            selected_nodes,
+            selected_edges,
+        )
 
     visual_ids = {node: _visual_id(node) for node in selected_nodes}
     layer_payloads = []
@@ -198,6 +224,8 @@ def build_shortest_dag(
     }
     if connector_metadata_truncated:
         stats["connector_metadata_truncated"] = True
+    if unhydrated_nodes:
+        stats["dropped_unhydrated_nodes"] = len(unhydrated_nodes)
     if include_debug:
         stats.update(
             {
@@ -582,6 +610,7 @@ def _format_artist_ref(graph: Graph, node: str) -> dict[str, Any]:
         "name": artist.get("name"),
         "sort_name": artist.get("sort_name"),
         "comment": artist.get("comment"),
+        "artist_type": artist.get("artist_type"),
         "gid": gid,
         "mbid": gid,
         "degree": artist.get("degree"),
@@ -606,6 +635,7 @@ def _format_layer_node(graph: Graph, node: str, score: int) -> dict[str, Any]:
                 "name": artist.get("name"),
                 "sort_name": artist.get("sort_name"),
                 "comment": artist.get("comment"),
+                "artist_type": artist.get("artist_type"),
                 "gid": gid,
                 "mbid": gid,
             }

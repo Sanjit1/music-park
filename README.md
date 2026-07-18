@@ -170,6 +170,8 @@ python scripts/refresh_graph.py \
   --restart-service
 ```
 
+Refresh validation is best-effort on memory-constrained hosts. The refresh flow still runs the validator, but if the validator is killed by the OS with a signal-9 style exit code, refresh logs a warning and continues instead of failing the entire refresh. You can still run `scripts/validate_graph.py` manually on a larger machine when you want a strict end-to-end path check.
+
 Restarting the service will only work if the service is running to begin with. You can enable the service by running:
 ```bash
 sudo cp deploy/music-mcn-refresh.service.example /etc/systemd/system/music-mcn-refresh.service
@@ -198,6 +200,15 @@ python scripts/search_path.py \
 The output includes the resolved artists, MCN hop count, raw bipartite path, and collapsed artist-to-artist path. Name lookup accepts an artist name or MBID. For duplicate names, it prefers the uniquely highest-degree exact or case-insensitive match and fails with top candidates if the best matches are still tied. 
 
 The search tool can also be run with the MBIDs of the artists, which means that a GUI may easily use this to take an unambiguous artist name and resolve it to an MBID, then use the MBID to search for the shortest path.
+
+If you just want the direct artist neighbors for one query, there is a small CLI for that too:
+```bash
+python scripts/direct_neighbors.py \
+  --graph data/artifacts/current \
+  --query "Bruce Springsteen" \
+  --output-dir data/outputs
+```
+It writes a JSON report into the output directory and prints the file path.
 
 
 ### Local API

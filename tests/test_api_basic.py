@@ -58,6 +58,14 @@ def test_bowie_freddie_path_and_cache(client):
     assert data["cache"] == "hit"
 
 
+def test_shortest_path_exposes_artist_type_on_nodes(monkeypatch, tmp_path):
+    app = tiny_app(monkeypatch, tmp_path, TinyGraph())
+    data = route(app, "/mcn/path")(source="A", target="B")
+    assert data["source"]["artist_type"] == "Person"
+    assert data["target"]["artist_type"] == "Group"
+    assert data["raw_path"][0]["node"] == "a:1"
+
+
 def test_bowie_freddie_shortest_dag(real_app):
     data = route(real_app, "/mcn/shortest-dag")(
         source="David Bowie",
@@ -83,8 +91,8 @@ class TinyGraph:
             "raw_bipartite_edges": 2,
         }
         self.artists = {
-            "a:1": {"node": "a:1", "artist_id": 1, "name": "A", "degree": 1},
-            "a:2": {"node": "a:2", "artist_id": 2, "name": "B", "degree": 1},
+            "a:1": {"node": "a:1", "artist_id": 1, "name": "A", "degree": 1, "artist_type": "Person"},
+            "a:2": {"node": "a:2", "artist_id": 2, "name": "B", "degree": 1, "artist_type": "Group"},
         }
         self.adjacency = {
             "a:1": ["r:1"],
